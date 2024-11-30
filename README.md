@@ -15,6 +15,7 @@
 
  2. 텍스쳐 파일을 첨부한다.
  ![image](https://github.com/user-attachments/assets/17d00983-0131-4c29-9ff8-b76bb59c58db)
+  
  png,jpg등 이미지 파일형식의 확장자를 가진 파일을 첨부한다.
  
  3D 모델과 텍스쳐 파일이 로드된 화면 
