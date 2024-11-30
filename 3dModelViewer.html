@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Model Viewer</title>
+    <style>
+        body,
+        html {
+            margin: 0;
+            padding: 0;
+            font-family: Arial, sans-serif;
+            height: 100%;
+            display: flex;
+            background-color: #f0f0f0;
+        }
+
+        #sidebar {
+            width: 300px;
+            padding: 20px;
+            background-color: #2c3e50;
+            color: #ecf0f1;
+            box-shadow: 2px 0 5px rgba(0, 0, 0, 0.1);
+        }
+
+        #viewer {
+            flex-grow: 1;
+            position: relative;
+        }
+
+        h2 {
+            margin-top: 0;
+            color: #3498db;
+        }
+
+        .file-input {
+            margin-bottom: 15px;
+            position: relative;
+        }
+
+        .file-input label {
+            display: block;
+            margin-bottom: 5px;
+            color: #bdc3c7;
+        }
+
+        .file-input input[type="file"] {
+            display: none;
+        }
+
+        .file-input .file-name {
+            padding: 8px;
+            background-color: #34495e;
+            color: #ecf0f1;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        .file-input .file-name:hover {
+            background-color: #2980b9;
+        }
+
+        .remove-button {
+            position: absolute;
+            top: 0;
+            right: 0;
+            background: #e74c3c;
+            color: white;
+            border: none;
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+            display: none;
+        }
+
+        .file-input.has-file .remove-button {
+            display: block;
+        }
+
+        #loadButton {
+            width: 100%;
+            padding: 10px;
+            background-color: #27ae60;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+
+        #loadButton:hover {
+            background-color: #2ecc71;
+        }
+
+        #loadButton:disabled {
+            background-color: #95a5a6;
+            cursor: not-allowed;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+    </style>
+</head>
+
+<body>
+    <div id="sidebar">
+        <h2>3D Model Viewer</h2>
+        <div class="file-input" id="modelFileInput">
+            <label for="modelInput">3D 모델링 파일 첨부</label>
+            <input type="file" id="modelInput" accept=".obj,.gltf,.glb,.fbx">
+            <label for="modelInput" class="file-name" id="modelFileName">클릭하여 파일을 선택해주세요</label>
+        </div>
+        <div class="file-input" id="textureFileInput">
+            <label for="textureInput">3D 모델링 텍스처 파일 첨부</label>
+            <div>
+                <input type="file" id="textureInput" accept=".png,.jpg,.jpeg">
+                <label for="textureInput" class="file-name" id="textureFileName">클릭하여 파일을 선택해주세요</label>
+            </div>
+            <button class="remove-button" id="removeTextureButton">&times;</button>
+        </div>
+
+        <button id="loadButton" disabled>검색</button>
+    </div>
+    <div id="viewer"></div> <!-- 3D 모델을 표시할 영역 -->
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.146.0/build/three.module.js",
+                "OrbitControls": "https://cdn.jsdelivr.net/npm/three@0.146.0/examples/jsm/controls/OrbitControls.js",
+                "OBJLoader": "https://cdn.jsdelivr.net/npm/three@0.146.0/examples/jsm/loaders/OBJLoader.js",
+                "GLTFLoader": "https://cdn.jsdelivr.net/npm/three@0.146.0/examples/jsm/loaders/GLTFLoader.js",
+                "FBXLoader": "https://cdn.jsdelivr.net/npm/three@0.146.0/examples/jsm/loaders/FBXLoader.js"
+            }
+        }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three'; 
+        import { OrbitControls } from 'OrbitControls'; 
+        import { OBJLoader } from 'OBJLoader'; 
+        import { GLTFLoader } from 'GLTFLoader';
+        import { FBXLoader } from 'FBXLoader';
+
+        let scene, camera, renderer, controls, currentObject, uploadedTexture;
+        let modelFile, textureFile;
+
+        function init() {
+            scene = new THREE.Scene();  //Three.js scene설정
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000); 
+            renderer = new THREE.WebGLRenderer({ antialias: true }); 
+            renderer.setSize(window.innerWidth - 300, window.innerHeight); 
+            document.getElementById('viewer').appendChild(renderer.domElement); 
+
+            setupLighting();
+
+            controls = new OrbitControls(camera, renderer.domElement); 
+            controls.enableDamping = true; 
+            controls.dampingFactor = 0.25; 
+            controls.screenSpacePanning = false; 
+            controls.maxPolarAngle = Math.PI; 
+
+            window.addEventListener('resize', onWindowResize, false); 
+
+            document.getElementById('modelInput').addEventListener('change', onModelSelect, false);  // 파일이 로드될때 이벤트
+            document.getElementById('textureInput').addEventListener('change', onTextureSelect, false); 
+            document.getElementById('removeTextureButton').addEventListener('click', onRemoveTextureClick, false); 
+            document.getElementById('loadButton').addEventListener('click', onLoadButtonClick, false); 
+
+            animate(); 
+        }
+
+        function setupLighting() {
+            scene.remove(...scene.children.filter(child => child instanceof THREE.Light)); //기존 light 제거
+
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
+            scene.add(ambientLight); //조명 추가
+
+            const lightPositions = [
+                { x: 5, y: 5, z: 5 },
+                { x: -5, y: 5, z: 5 },
+                { x: 5, y: -5, z: 5 },
+                { x: -5, y: -5, z: 5 },
+                { x: 5, y: 5, z: -5 },
+                { x: -5, y: 5, z: -5 },
+                { x: 5, y: -5, z: -5 },
+                { x: -5, y: -5, z: -5 }
+            ]; //8개의 위치에서 점등되는 조명 추가
+
+            lightPositions.forEach(pos => {
+                const pointLight = new THREE.PointLight(0xffffff, 0.3);
+                pointLight.position.set(pos.x, pos.y, pos.z);
+                scene.add(pointLight);
+            }); // 각 조명 scene에 추가
+        }
+
+        function onModelSelect(event) {
+            modelFile = event.target.files[0]; 
+            document.getElementById('modelFileName').textContent = modelFile ? modelFile.name : 'No file chosen'; 
+            updateLoadButtonState(); 
+        }
+
+        function onTextureSelect(event) {
+            textureFile = event.target.files[0]; 
+            document.getElementById('textureFileName').textContent = textureFile ? textureFile.name : 'No file chosen'; 
+            document.getElementById('textureFileInput').classList.add('has-file'); 
+            updateLoadButtonState(); 
+        }
+
+        function onRemoveTextureClick() {
+            textureFile = null; 
+            uploadedTexture = null; 
+            document.getElementById('textureFileName').textContent = '클릭하여 파일을 선택해주세요'; 
+            document.getElementById('textureFileInput').classList.remove('has-file'); 
+            document.getElementById('textureInput').value = null; 
+            removeTextureFromModel(); 
+        }
+
+        function updateLoadButtonState() {
+            document.getElementById('loadButton').disabled = !modelFile; 
+        }
+
+        function onLoadButtonClick() {
+            if (modelFile) {
+                loadModelAndTexture(); 
+            }
+        }
+
+        function loadModelAndTexture() {
+            const modelExtension = modelFile.name.split('.').pop().toLowerCase(); 
+            
+            if (modelExtension === 'obj') {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const loader = new OBJLoader();
+                    const object = loader.parse(e.target.result);
+                    addObjectToScene(object);
+                    if (textureFile) loadTexture();
+                };
+                reader.readAsText(modelFile);
+            } else if (modelExtension === 'gltf' || modelExtension === 'glb') {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    const loader = new GLTFLoader();
+                    loader.parse(e.target.result, '', function(gltf) {
+                        addObjectToScene(gltf.scene);
+                        if (textureFile) loadTexture();
+                    });
+                };
+                reader.readAsArrayBuffer(modelFile);
+            } else if (modelExtension === 'fbx') {
+                const loader = new FBXLoader();
+                loader.load(URL.createObjectURL(modelFile), function(object) {
+                    addObjectToScene(object);
+                    if (textureFile) loadTexture();
+                });
+            }
+        }
+
+        function loadTexture() {
+            const reader = new FileReader(); 
+            reader.onload = function(e) {
+                const textureLoader = new THREE.TextureLoader(); 
+                uploadedTexture = textureLoader.load(e.target.result); 
+                applyTextureToModel(); 
+            };
+            reader.readAsDataURL(textureFile); 
+        }
+
+        function applyTextureToModel() {
+            if (currentObject) {
+                currentObject.traverse(function(child) {
+                    if (child.isMesh) {
+                        child.material.map = uploadedTexture; 
+                        child.material.needsUpdate = true; 
+                    }
+                });
+            }
+        }
+
+        function removeTextureFromModel() {
+            if (currentObject) {
+                currentObject.traverse(function(child) {
+                    if (child.isMesh) {
+                        child.material.map = null; 
+                        child.material.needsUpdate = true; 
+                    }
+                });
+            }
+        }
+
+        function addObjectToScene(object) {
+            if (currentObject) {
+                scene.remove(currentObject); 
+            }
+            currentObject = object; 
+            scene.add(object); 
+
+            const box = new THREE.Box3().setFromObject(object); 
+            const center = box.getCenter(new THREE.Vector3()); 
+            const size = box.getSize(new THREE.Vector3()); 
+            
+            const maxDim = Math.max(size.x, size.y, size.z); 
+            const fov = camera.fov * (Math.PI / 180); 
+            let cameraZ = Math.abs(maxDim / 2 / Math.tan(fov / 2)); 
+            cameraZ *= 1.5; 
+
+            camera.position.set(center.x, center.y, center.z + cameraZ); 
+            controls.target.copy(center); 
+            camera.updateProjectionMatrix(); 
+            controls.update(); 
+
+            adjustLightingToObject(object);
+        }
+
+        function adjustLightingToObject(object) {
+            const box = new THREE.Box3().setFromObject(object);
+            const size = box.getSize(new THREE.Vector3());
+            const maxDim = Math.max(size.x, size.y, size.z);
+
+            scene.children.filter(child => child instanceof THREE.PointLight).forEach((light, index) => {
+                const lightPositions = [
+                    { x: 1, y: 1, z: 1 },
+                    { x: -1, y: 1, z: 1 },
+                    { x: 1, y: -1, z: 1 },
+                    { x: -1, y: -1, z: 1 },
+                    { x: 1, y: 1, z: -1 },
+                    { x: -1, y: 1, z: -1 },
+                    { x: 1, y: -1, z: -1 },
+                    { x: -1, y: -1, z: -1 }
+                ];
+
+                const pos = lightPositions[index];
+                light.position.set(pos.x * maxDim, pos.y * maxDim, pos.z * maxDim);
+            });
+        }
+
+        function animate() {
+            requestAnimationFrame(animate); 
+            controls.update(); 
+            renderer.render(scene, camera); 
+        }
+
+        function onWindowResize() {
+            camera.aspect = (window.innerWidth - 300) / window.innerHeight; 
+            camera.updateProjectionMatrix(); 
+            renderer.setSize(window.innerWidth - 300, window.innerHeight); 
+        }
+
+        init();
+    </script>
+</body>
+
+</html>
